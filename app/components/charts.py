@@ -163,3 +163,96 @@ def make_boxplot_comparison(
     )
 
     return fig
+
+# Linear 
+def make_decision_boundary_plot(model, X, y, title: str):
+    import numpy as np
+    import pandas as pd
+    import plotly.graph_objects as go
+
+    x_min, x_max = X[:, 0].min() - 0.5, X[:, 0].max() + 0.5
+    y_min, y_max = X[:, 1].min() - 0.5, X[:, 1].max() + 0.5
+
+    xx, yy = np.meshgrid(
+        np.linspace(x_min, x_max, 200),
+        np.linspace(y_min, y_max, 200),
+    )
+
+    grid = np.c_[xx.ravel(), yy.ravel()]
+    Z = model.predict(grid).reshape(xx.shape)
+
+    fig = go.Figure()
+
+    fig.add_trace(
+        go.Contour(
+            x=np.linspace(x_min, x_max, 200),
+            y=np.linspace(y_min, y_max, 200),
+            z=Z,
+            showscale=False,
+            opacity=0.3,
+        )
+    )
+
+    scatter_df = pd.DataFrame(X, columns=["x1", "x2"])
+    scatter_df["target"] = y.astype(str)
+
+    for cls in scatter_df["target"].unique():
+        subset = scatter_df[scatter_df["target"] == cls]
+        fig.add_trace(
+            go.Scatter(
+                x=subset["x1"],
+                y=subset["x2"],
+                mode="markers",
+                name=f"Class {cls}",
+            )
+        )
+
+    fig.update_layout(title=title)
+    return fig
+
+def make_kernel_boundary_plot(model, raw_df, mapping_fn, title: str):
+    import numpy as np
+    import pandas as pd
+    import plotly.graph_objects as go
+
+    x_min, x_max = raw_df["x1"].min() - 0.5, raw_df["x1"].max() + 0.5
+    y_min, y_max = raw_df["x2"].min() - 0.5, raw_df["x2"].max() + 0.5
+
+    xx, yy = np.meshgrid(
+        np.linspace(x_min, x_max, 200),
+        np.linspace(y_min, y_max, 200),
+    )
+
+    grid_df = pd.DataFrame({
+        "x1": xx.ravel(),
+        "x2": yy.ravel(),
+    })
+
+    mapped_grid = mapping_fn(grid_df)
+    Z = model.predict(mapped_grid.values).reshape(xx.shape)
+
+    fig = go.Figure()
+
+    fig.add_trace(
+        go.Contour(
+            x=np.linspace(x_min, x_max, 200),
+            y=np.linspace(y_min, y_max, 200),
+            z=Z,
+            showscale=False,
+            opacity=0.3,
+        )
+    )
+
+    for cls in raw_df["target"].unique():
+        subset = raw_df[raw_df["target"] == cls]
+        fig.add_trace(
+            go.Scatter(
+                x=subset["x1"],
+                y=subset["x2"],
+                mode="markers",
+                name=f"Class {cls}",
+            )
+        )
+
+    fig.update_layout(title=title)
+    return fig

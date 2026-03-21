@@ -6,6 +6,7 @@ import plotly.express as px
 import streamlit as st
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import LogisticRegression
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
@@ -15,6 +16,10 @@ from src.kernel.generators import generate_kernel_dataset
 from src.kernel.mappings import apply_polynomial_mapping
 from src.llm.tutor import ask_tutor
 from src.llm.client import is_ollama_running
+from components.charts import (
+    make_decision_boundary_plot,
+    make_kernel_boundary_plot,
+)
 
 
 st.title("🌀 Kernel Trick Visualizer")
@@ -52,7 +57,7 @@ kernel_data = generate_kernel_dataset(
 )
 
 # -------------------------
-# SAVE CONTEXT FOR AI TUTOR (DO NOT CHANGE)
+# SAVE CONTEXT FOR AI TUTOR
 # -------------------------
 st.session_state["current_page"] = "kernel trick"
 
@@ -93,6 +98,21 @@ raw_fig = px.scatter(
 )
 st.plotly_chart(raw_fig, use_container_width=True)
 
+# Linear boundary in original space
+X_original = kernel_data.features_df[["x1", "x2"]].values
+y = kernel_data.target_series.values
+
+linear_model_original = LogisticRegression()
+linear_model_original.fit(X_original, y)
+
+boundary_fig_original = make_decision_boundary_plot(
+    linear_model_original,
+    X_original,
+    y,
+    title="Linear Decision Boundary in Original Space",
+)
+st.plotly_chart(boundary_fig_original, use_container_width=True)
+
 current_original_state = {
     "dataset_name": dataset_name,
     "n_samples": n_samples,
@@ -104,7 +124,6 @@ if st.button("🧠 Explain this chart", key="explain_kernel_original_inline"):
     if not is_ollama_running():
         st.warning("Ollama is not running.")
     else:
-        # ✅ keep tutor compatibility
         st.session_state["kernel_chart_context"] = {
             "chart_name": "original_input_space",
             "dataset_name": dataset_name,
@@ -113,9 +132,9 @@ if st.button("🧠 Explain this chart", key="explain_kernel_original_inline"):
         }
 
         question = (
-            f"Explain this original 2D input space for the '{dataset_name}' dataset. "
-            f"The number of samples is {n_samples} and the noise level is {noise}. "
-            f"Explain why the classes may be difficult to separate and what noise changes visually."
+            f"Explain this original 2D input space and the linear decision boundary for the "
+            f"'{dataset_name}' dataset. The number of samples is {n_samples} and the noise level is {noise}. "
+            f"Explain why a straight-line separator struggles here and what noise changes visually."
         )
 
         with st.spinner("Generating explanation..."):
@@ -141,7 +160,6 @@ if st.session_state["kernel_original_explanation"]:
 
     with st.expander("Chart explanation", expanded=not is_stale):
         st.write(st.session_state["kernel_original_explanation"])
-
 
 # -------------------------
 # MAPPING + PCA PROJECTION
@@ -182,6 +200,18 @@ projected_fig = px.scatter(
 )
 st.plotly_chart(projected_fig, use_container_width=True)
 
+# Boundary after mapping, shown back in original space
+linear_model_mapped = LogisticRegression()
+linear_model_mapped.fit(mapped_df.values, y)
+
+kernel_boundary_fig = make_kernel_boundary_plot(
+    linear_model_mapped,
+    raw_df,
+    apply_polynomial_mapping,
+    title="Decision Boundary After Polynomial Mapping",
+)
+st.plotly_chart(kernel_boundary_fig, use_container_width=True)
+
 current_projected_state = {
     "dataset_name": dataset_name,
     "n_samples": n_samples,
@@ -194,7 +224,6 @@ if st.button("🧠 Explain this chart", key="explain_kernel_projected_inline"):
     if not is_ollama_running():
         st.warning("Ollama is not running.")
     else:
-        # ✅ keep tutor compatibility
         st.session_state["kernel_chart_context"] = {
             "chart_name": "projected_transformed_space",
             "dataset_name": dataset_name,
@@ -204,9 +233,9 @@ if st.button("🧠 Explain this chart", key="explain_kernel_projected_inline"):
         }
 
         question = (
-            f"Explain this projected transformed feature space for the '{dataset_name}' dataset. "
-            f"The number of samples is {n_samples}, the noise level is {noise}, and the mapping is polynomial. "
-            f"Explain what this suggests about how polynomial mapping changes the data representation."
+            f"Explain this transformed representation and the nonlinear decision boundary for the "
+            f"'{dataset_name}' dataset. The number of samples is {n_samples}, the noise level is {noise}, "
+            f"and the mapping is polynomial. Explain why mapping into richer features can help separation."
         )
 
         with st.spinner("Generating explanation..."):
@@ -233,6 +262,14 @@ if st.session_state["kernel_projected_explanation"]:
     with st.expander("Chart explanation", expanded=not is_stale):
         st.write(st.session_state["kernel_projected_explanation"])
 
+st.markdown("### Comparing the boundaries")
+st.markdown(
+    """
+    In the original input space, a linear classifier can only draw a straight boundary, which often struggles on
+    datasets like moons or circles. After polynomial mapping, the classifier is still linear in the transformed
+    feature space, but this corresponds to a curved boundary when viewed back in the original space.
+    """
+)
 
 # -------------------------
 # INTUITION
