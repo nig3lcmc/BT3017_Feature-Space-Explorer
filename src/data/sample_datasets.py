@@ -27,6 +27,19 @@ def load_sample_dataset(name: str) -> pd.DataFrame:
     raise ValueError(f"Unsupported dataset: {name}")
 
 
+def load_uploaded_dataset(uploaded_file) -> pd.DataFrame:
+    """Load a dataset uploaded by the user from a CSV file."""
+    try:
+        df = pd.read_csv(uploaded_file)
+    except Exception as e:
+        raise ValueError(f"Unable to parse uploaded CSV file: {e}")
+
+    if df.empty:
+        raise ValueError("Uploaded dataset is empty")
+
+    return df
+
+
 def get_available_datasets() -> list[str]:
     """
     Return the list of supported sample datasets.

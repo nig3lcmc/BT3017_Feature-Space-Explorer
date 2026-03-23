@@ -28,33 +28,94 @@ st.write("See how nonlinear data can become easier to separate after feature tra
 # -------------------------
 # Inputs
 # -------------------------
-dataset_name = st.selectbox(
-    "Choose a synthetic dataset",
-    options=["moons", "circles"],
-    index=0,
+# initialize in case we are in upload mode and synthetic sliders are skipped
+n_samples = None
+noise = None
+x_feature = "x1"
+y_feature = "x2"
+target_column = None
+
+uploaded_file = st.file_uploader(
+    "Upload your CSV dataset",
+    type=["csv"],
+    help="Upload a dataset with at least two numeric columns; this will override synthetic sample options.",
 )
 
-n_samples = st.slider(
-    "Number of samples",
-    min_value=100,
-    max_value=1000,
-    value=300,
-    step=50,
-)
+if uploaded_file is not None:
+    try:
+        uploaded_df = pd.read_csv(uploaded_file)
+    except Exception as e:
+        st.error(f"Unable to read uploaded CSV: {e}")
+        st.stop()
 
-noise = st.slider(
-    "Noise level",
-    min_value=0.0,
-    max_value=0.3,
-    value=0.1,
-    step=0.01,
-)
+    numeric_cols = uploaded_df.select_dtypes(include=["number"]).columns.tolist()
+    if len(numeric_cols) < 2:
+        st.error("Uploaded dataset must have at least two numeric columns.")
+        st.stop()
 
-kernel_data = generate_kernel_dataset(
-    dataset_name=dataset_name,
-    n_samples=n_samples,
-    noise=noise,
-)
+    x_feature = st.selectbox("Choose X feature", options=numeric_cols, index=0)
+    y_feature = st.selectbox(
+        "Choose Y feature",
+        options=[c for c in numeric_cols if c != x_feature],
+        index=0,
+    )
+
+    categorical_candidates = [
+        c
+        for c in uploaded_df.columns
+        if c not in [x_feature, y_feature] and uploaded_df[c].nunique() <= 20
+    ]
+    if categorical_candidates:
+        target_column = st.selectbox("Choose target column", options=categorical_candidates)
+        target_series = uploaded_df[target_column].astype(str)
+    else:
+        st.info(
+            "No suitable target column found; using numeric discretized target from the first numeric column."
+        )
+        target_series = pd.qcut(uploaded_df[numeric_cols[0]], q=2, labels=False, duplicates="drop").astype(str)
+
+    kernel_features_df = pd.DataFrame({
+        "x1": uploaded_df[x_feature],
+        "x2": uploaded_df[y_feature],
+    })
+    dataset_name = f"uploaded:{uploaded_file.name}"
+
+else:
+    dataset_name = st.selectbox(
+        "Choose a synthetic dataset",
+        options=["moons", "circles"],
+        index=0,
+    )
+
+    n_samples = st.slider(
+        "Number of samples",
+        min_value=100,
+        max_value=1000,
+        value=300,
+        step=50,
+    )
+
+    noise = st.slider(
+        "Noise level",
+        min_value=0.0,
+        max_value=0.3,
+        value=0.1,
+        step=0.01,
+    )
+
+    kernel_data = generate_kernel_dataset(
+        dataset_name=dataset_name,
+        n_samples=n_samples,
+        noise=noise,
+    )
+
+    kernel_features_df = kernel_data.features_df.copy()
+    target_series = kernel_data.target_series
+
+raw_df = kernel_features_df.copy()
+raw_df["target"] = target_series.values.astype(str)
+
+st.markdown("### Original 2D Feature Space")
 
 # -------------------------
 # SAVE CONTEXT FOR AI TUTOR
@@ -65,6 +126,9 @@ st.session_state["kernel_context"] = {
     "dataset_name": dataset_name,
     "n_samples": n_samples,
     "noise": noise,
+    "x_feature": x_feature,
+    "y_feature": y_feature,
+    "target_column": target_column,
     "mapping": "polynomial",
 }
 
@@ -84,8 +148,8 @@ if "kernel_projected_state" not in st.session_state:
 # -------------------------
 # ORIGINAL SPACE
 # -------------------------
-raw_df = kernel_data.features_df.copy()
-raw_df["target"] = kernel_data.target_series.values.astype(str)
+raw_df = kernel_features_df.copy()
+raw_df["target"] = target_series.values.astype(str)
 
 st.markdown("### Original 2D Feature Space")
 
@@ -99,8 +163,8 @@ raw_fig = px.scatter(
 st.plotly_chart(raw_fig, use_container_width=True)
 
 # Linear boundary in original space
-X_original = kernel_data.features_df[["x1", "x2"]].values
-y = kernel_data.target_series.values
+X_original = kernel_features_df[["x1", "x2"]].values
+y = target_series.values
 
 linear_model_original = LogisticRegression()
 linear_model_original.fit(X_original, y)
@@ -164,9 +228,9 @@ if st.session_state["kernel_original_explanation"]:
 # -------------------------
 # MAPPING + PCA PROJECTION
 # -------------------------
-mapped_df = apply_polynomial_mapping(kernel_data.features_df)
+mapped_df = apply_polynomial_mapping(kernel_features_df)
 mapped_with_target = mapped_df.copy()
-mapped_with_target["target"] = kernel_data.target_series.values.astype(str)
+mapped_with_target["target"] = target_series.values.astype(str)
 
 st.markdown("### Transformed Feature Preview")
 st.dataframe(mapped_with_target.head(10), use_container_width=True)
@@ -187,7 +251,7 @@ pca = PCA(n_components=2)
 mapped_projected = pca.fit_transform(mapped_scaled)
 
 projected_df = pd.DataFrame(mapped_projected, columns=["PC1", "PC2"])
-projected_df["target"] = kernel_data.target_series.values.astype(str)
+projected_df["target"] = target_series.values.astype(str)
 
 st.markdown("### 2D Projection of Transformed Feature Space")
 

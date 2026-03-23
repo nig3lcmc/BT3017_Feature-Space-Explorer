@@ -9,7 +9,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.append(str(PROJECT_ROOT))
 
-from src.data.sample_datasets import get_available_datasets, load_sample_dataset
+from src.data.sample_datasets import (
+    get_available_datasets,
+    load_sample_dataset,
+    load_uploaded_dataset,
+)
 from src.pca.pipeline import run_pca
 from src.llm.tutor import ask_tutor
 from src.llm.client import is_ollama_running
@@ -21,14 +25,29 @@ st.write("Reduce dimensions and inspect explained variance.")
 # -------------------------
 # Dataset selection
 # -------------------------
-dataset_name = st.selectbox(
-    "Choose a sample dataset",
-    options=get_available_datasets(),
-    index=0,
-    key="pca_dataset",
+uploaded_file = st.file_uploader(
+    "Upload your CSV dataset",
+    type=["csv"],
+    help="If you upload a dataset, it will be used instead of sample datasets.",
 )
 
-df = load_sample_dataset(dataset_name)
+if uploaded_file is not None:
+    try:
+        df = load_uploaded_dataset(uploaded_file)
+        dataset_name = f"uploaded:{uploaded_file.name}"
+        st.success(f"Loaded uploaded dataset: {uploaded_file.name}")
+    except Exception as exc:
+        st.error(str(exc))
+        st.stop()
+else:
+    dataset_name = st.selectbox(
+        "Choose a sample dataset",
+        options=get_available_datasets(),
+        index=0,
+        key="pca_dataset",
+    )
+    df = load_sample_dataset(dataset_name)
+
 numeric_df = df.select_dtypes(include=["number"]).drop(columns=["target"], errors="ignore")
 max_components = max(1, numeric_df.shape[1])
 
