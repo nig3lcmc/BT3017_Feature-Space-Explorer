@@ -17,13 +17,35 @@ from app.components.charts import (
     make_correlation_circle,
     make_correlation_3d,
 )
+from app.components.sidebar_tutor import render_sidebar_tutor
 from src.content.pca_theory import render_pca_theory_panel
 from src.data.sample_datasets import (
     get_available_datasets,
     load_sample_dataset,
     load_uploaded_dataset,
 )
+from src.llm.context_builder import set_page_context
 from src.pca.pipeline import run_pca
+
+
+# -------------------------------------------------------------------
+# Page bootstrapping for tutor
+# -------------------------------------------------------------------
+st.session_state["current_page"] = "pca"
+
+# Minimal safe context first so the tutor always knows the page,
+# even before a dataset is loaded.
+set_page_context(
+    page="pca",
+    section="loading",
+    visible_elements=["dataset uploader", "theory panel"],
+    hidden_elements=["no PCA chart visible until a dataset is loaded"],
+    controls={},
+    chart_summary="The PCA page is open, but no dataset has been loaded yet.",
+    notes=["Do not describe a scree plot unless a dataset has been loaded."],
+)
+
+render_sidebar_tutor()
 
 
 TABS = [
@@ -34,32 +56,22 @@ TABS = [
 ]
 
 
-# ─────────────────────────────────────────────────────────────
-# Contextual k-selection guidance (data-driven, per-tab)
-# ─────────────────────────────────────────────────────────────
-
+# -------------------------------------------------------------------
+# Helpers
+# -------------------------------------------------------------------
 def _compute_k_rules(
     explained_variance: list[float],
     cumulative_variance: list[float],
     eigenvalues: list[float],
 ) -> dict:
-    """
-    Compute the four standard rules for choosing k.
-    Returns a dict with keys: k_90, k_80, kaiser_k, elbow_k.
-    """
     n = len(explained_variance)
 
-    # Rule 1: cumulative variance thresholds
     k_90 = next((i + 1 for i, cv in enumerate(cumulative_variance) if cv >= 0.90), n)
     k_80 = next((i + 1 for i, cv in enumerate(cumulative_variance) if cv >= 0.80), n)
 
-    # Rule 2: Kaiser criterion — keep components whose eigenvalue > 1.
-    # Eigenvalues from sklearn PCA are already in variance units (not ratio),
-    # so we compare directly against 1.0.
     kaiser_k = sum(1 for ev in eigenvalues if ev >= 1.0)
     kaiser_k = max(1, kaiser_k)
 
-    # Rule 3: Scree elbow — largest drop between consecutive bars
     if len(explained_variance) >= 3:
         drops = [
             explained_variance[i] - explained_variance[i + 1]
@@ -80,11 +92,6 @@ def _k_guidance(
     k: int,
     context: str = "variance",
 ) -> None:
-    """
-    Render inline k-selection guidance directly above the chart — always visible,
-    not hidden in an expander. Shows a rule comparison table, a verdict card for
-    the current k, and context-specific chart-reading tips.
-    """
     rules = _compute_k_rules(explained_variance, cumulative_variance, eigenvalues)
     k_90, k_80 = rules["k_90"], rules["k_80"]
     kaiser_k, elbow_k = rules["kaiser_k"], rules["elbow_k"]
@@ -92,7 +99,6 @@ def _k_guidance(
     current_cv = cumulative_variance[k - 1] * 100
     current_ev = explained_variance[k - 1] * 100
 
-    # Verdict colour
     if current_cv >= 90:
         icon, color, verdict = "✅", "#4ade80", "Strong choice — captures ≥ 90% of variance."
     elif current_cv >= 80:
@@ -100,7 +106,6 @@ def _k_guidance(
     else:
         icon, color, verdict = "⚠️", "#f87171", f"Low coverage — consider raising k to {k_90}."
 
-    # ── Chart-reading tip (context-specific) ────────────────
     if context == "variance":
         tip = (
             "**Reading the scree plot:** each bar = one component's individual variance. "
@@ -118,17 +123,16 @@ def _k_guidance(
 
     st.markdown(tip)
 
-    # ── Rule comparison table ────────────────────────────────
-    cv_at_90  = cumulative_variance[k_90 - 1] * 100
-    cv_at_80  = cumulative_variance[k_80 - 1] * 100
+    cv_at_90 = cumulative_variance[k_90 - 1] * 100
+    cv_at_80 = cumulative_variance[k_80 - 1] * 100
     cv_kaiser = cumulative_variance[kaiser_k - 1] * 100
-    cv_elbow  = cumulative_variance[elbow_k - 1] * 100
+    cv_elbow = cumulative_variance[elbow_k - 1] * 100
 
     rows = [
-        ("90% variance threshold", k_90,     f"{cv_at_90:.1f}%",  "Most common practical rule"),
-        ("80% variance threshold", k_80,     f"{cv_at_80:.1f}%",  "Lighter compression, acceptable loss"),
+        ("90% variance threshold", k_90, f"{cv_at_90:.1f}%", "Most common practical rule"),
+        ("80% variance threshold", k_80, f"{cv_at_80:.1f}%", "Lighter compression, acceptable loss"),
         ("Kaiser criterion (λ ≥ 1)", kaiser_k, f"{cv_kaiser:.1f}%", "Keep components above average variance"),
-        ("Scree elbow",            elbow_k,  f"{cv_elbow:.1f}%",  "Diminishing returns beyond this point"),
+        ("Scree elbow", elbow_k, f"{cv_elbow:.1f}%", "Diminishing returns beyond this point"),
     ]
 
     header = "| Rule | Suggested k | Variance captured | Why |\n|---|:---:|:---:|---|\n"
@@ -140,7 +144,6 @@ def _k_guidance(
     )
     st.markdown(header + body)
 
-    # ── Verdict card for current k ───────────────────────────
     st.markdown(
         f"""
         <div style="
@@ -200,20 +203,21 @@ def render_tab_buttons():
                 st.rerun()
 
 
+# -------------------------------------------------------------------
+# Page header
+# -------------------------------------------------------------------
 st.title("PCA Explorer")
 st.write(
     "Upload your data or try a demo. PCA finds the directions of maximum variance — "
     "helping you understand structure, correlations, and redundancy in your features."
 )
 
-# -------------------------
-# Theory
-# -------------------------
 render_pca_theory_panel()
 
-# -------------------------
+
+# -------------------------------------------------------------------
 # Data loader
-# -------------------------
+# -------------------------------------------------------------------
 section_label("Load your dataset")
 
 uploaded_file = st.file_uploader(
@@ -248,11 +252,29 @@ elif demo_dataset:
     dataset_name = demo_dataset
 
 if df is None:
+    set_page_context(
+        page="pca",
+        section="loading",
+        visible_elements=["dataset uploader", "demo dataset selector"],
+        hidden_elements=["no PCA charts visible"],
+        controls={},
+        chart_summary="No dataset has been loaded yet, so no PCA output is visible.",
+        notes=["Do not talk about a scree plot until a dataset exists."],
+    )
     st.info("Load a dataset to begin. Try Iris or Wine above.")
     st.stop()
 
 numeric_cols = df.select_dtypes(include=["number"]).columns.tolist()
 if not numeric_cols:
+    set_page_context(
+        page="pca",
+        section="loading error",
+        visible_elements=["uploaded dataset"],
+        hidden_elements=["no PCA charts visible"],
+        controls={"dataset_name": dataset_name},
+        chart_summary="The uploaded dataset has no numeric columns, so PCA cannot be run.",
+        notes=["Say that PCA needs numeric columns."],
+    )
     st.error("No numeric columns found for PCA.")
     st.stop()
 
@@ -267,9 +289,10 @@ for c in non_numeric_cols:
     if c not in label_candidates:
         label_candidates.append(c)
 
-# -------------------------
+
+# -------------------------------------------------------------------
 # Run PCA
-# -------------------------
+# -------------------------------------------------------------------
 pca_result = run_pca(df, exclude_cols=[])
 
 max_k = min(pca_result.d, pca_result.n - 1, 20)
@@ -301,18 +324,14 @@ label_values = (
     else None
 )
 
-# -------------------------
-# Summary cards
-# -------------------------
+# Summary metrics
 m1, m2, m3, m4 = st.columns(4)
 m1.metric("Samples", pca_result.n)
 m2.metric("Original Dims", pca_result.d)
 m3.metric("Components (k)", k)
 m4.metric("Variance Kept", f"{pca_result.cumulative_variance[k - 1] * 100:.1f}%")
 
-# -------------------------
 # Tabs
-# -------------------------
 render_tab_buttons()
 active_tab = st.session_state["pca_active_tab"]
 
@@ -350,13 +369,6 @@ if active_tab == "variance":
         use_container_width=True,
     )
 
-    # ── Eigenvalue table with k-cutoff highlighted ────────────
-    rules = _compute_k_rules(
-        pca_result.explained_variance,
-        pca_result.cumulative_variance,
-        pca_result.eigenvalues,
-    )
-
     st.markdown("#### Eigenvalue table")
     st.caption(
         "Rows at or below the red line (your current k) are the components you are keeping. "
@@ -384,10 +396,7 @@ elif active_tab == "features":
         unsafe_allow_html=True,
     )
 
-    # ── PC selector as pill buttons ──────────────────────────
     pc_options = [f"PC{i+1}" for i in range(k)]
-    pc_cols = st.columns(min(k, 8))
-
     sel_label = st.session_state.get("pca_selected_pc_label", pc_options[0])
     if sel_label not in pc_options:
         sel_label = pc_options[0]
@@ -420,7 +429,6 @@ elif active_tab == "features":
     selected_pc = pc_options.index(sel_label)
     st.session_state["pca_selected_pc"] = selected_pc
 
-    # ── Horizontal diverging bar chart ───────────────────────
     st.plotly_chart(
         make_pca_loadings_bar(
             pca_result.loadings,
@@ -433,7 +441,6 @@ elif active_tab == "features":
 
     st.divider()
 
-    # ── Loadings table ────────────────────────────────────────
     st.markdown(
         f"<span style='font-size:.75rem;letter-spacing:.1em;font-weight:700;"
         f"text-transform:uppercase;color:#64748b'>Component Loadings</span><br>"
@@ -453,7 +460,6 @@ elif active_tab == "features":
 
     st.divider()
 
-    # ── Correlation explorer ──────────────────────────────────
     st.markdown("### Feature correlation space")
     st.write(
         "Arrows pointing in the **same direction** = positively correlated features. "
@@ -463,8 +469,10 @@ elif active_tab == "features":
 
     if k >= 3:
         view_mode = st.radio(
-            "View mode", ["2D Correlation Circle", "3D Space Explorer"],
-            horizontal=True, label_visibility="collapsed",
+            "View mode",
+            ["2D Correlation Circle", "3D Space Explorer"],
+            horizontal=True,
+            label_visibility="collapsed",
         )
     else:
         view_mode = "2D Correlation Circle"
@@ -476,10 +484,11 @@ elif active_tab == "features":
                 pc_x_label = st.selectbox("Horizontal axis", pc_options, index=0, key="circ_pcx")
             with axis_cols[1]:
                 remaining = [p for p in pc_options if p != pc_x_label]
-                pc_y_label = st.selectbox("Vertical axis", remaining,
-                                          index=0, key="circ_pcy")
+                pc_y_label = st.selectbox("Vertical axis", remaining, index=0, key="circ_pcy")
+
             pc_x_idx = pc_options.index(pc_x_label)
             pc_y_idx = pc_options.index(pc_y_label)
+
             st.plotly_chart(
                 make_correlation_circle(
                     pca_result.loadings,
@@ -492,8 +501,7 @@ elif active_tab == "features":
             )
         else:
             st.info("Select at least 2 components (k ≥ 2) to view the correlation circle.")
-
-    else:  # 3D
+    else:
         show_scores = st.checkbox("Show data points (scores) in 3D space", value=True)
         st.plotly_chart(
             make_correlation_3d(
@@ -573,16 +581,95 @@ elif active_tab == "reconstruct":
 
 st.markdown("</div>", unsafe_allow_html=True)
 
-# -------------------------
-# Store context
-# -------------------------
-st.session_state["current_page"] = "pca"
+
+# -------------------------------------------------------------------
+# Grounded tutor context (tab-specific)
+# -------------------------------------------------------------------
+selected_pc_label = f"PC{st.session_state.get('pca_selected_pc', 0) + 1}"
+current_label_col = st.session_state.get("pca_label_col")
+current_view_mode = locals().get("view_mode", None)
+
+top_loadings = []
+if active_tab == "features":
+    try:
+        selected_pc_idx = st.session_state.get("pca_selected_pc", 0)
+        loadings = pca_result.loadings[selected_pc_idx]
+        pairs = list(zip(pca_result.feature_names, loadings))
+        pairs_sorted = sorted(pairs, key=lambda x: abs(x[1]), reverse=True)[:5]
+        top_loadings = [f"{name} ({value:+.3f})" for name, value in pairs_sorted]
+    except Exception:
+        top_loadings = []
+
+pc1_pct = pca_result.explained_variance[0] * 100 if len(pca_result.explained_variance) > 0 else 0
+pc2_pct = pca_result.explained_variance[1] * 100 if len(pca_result.explained_variance) > 1 else 0
+cum_k_pct = pca_result.cumulative_variance[k - 1] * 100
+
+if active_tab == "variance":
+    visible_elements = ["scree plot", "eigenvalue table", "variance guidance"]
+    hidden_elements = ["no kernel-step tabs", "no preprocessing workflow"]
+    chart_summary = (
+        f"The scree plot is visible. PC1 explains about {pc1_pct:.1f}% of the variance, "
+        f"PC2 explains about {pc2_pct:.1f}%, and the first {k} components explain about "
+        f"{cum_k_pct:.1f}% cumulatively."
+    )
+elif active_tab == "features":
+    visible_elements = ["loadings chart", "loadings heatmap", "feature correlation explorer"]
+    hidden_elements = ["no kernel-step tabs", "no preprocessing workflow"]
+    chart_summary = (
+        f"The user is viewing PCA feature contributions for {selected_pc_label}. "
+        f"Top loadings: {top_loadings if top_loadings else 'not available'}."
+    )
+elif active_tab == "scores":
+    visible_elements = ["scores plot"]
+    hidden_elements = ["no kernel-step tabs", "no preprocessing workflow"]
+    chart_summary = (
+        f"The user is viewing the PCA scores plot"
+        f"{f' coloured by {current_label_col}' if current_label_col else ''}."
+    )
+else:
+    visible_elements = ["reconstruction error plot", "variance retention metrics"]
+    hidden_elements = ["no kernel-step tabs", "no preprocessing workflow"]
+    chart_summary = (
+        f"The user is viewing reconstruction error. "
+        f"With k={k}, about {cum_k_pct:.1f}% of variance is retained."
+    )
+
+set_page_context(
+    page="pca",
+    section=active_tab,
+    visible_elements=visible_elements,
+    hidden_elements=hidden_elements,
+    controls={
+        "dataset_name": dataset_name,
+        "n_components": k,
+        "selected_pc": selected_pc_label,
+        "label_col": current_label_col,
+        "view_mode": current_view_mode,
+    },
+    chart_summary=chart_summary,
+    notes=[
+        "If the user asks about optimal k, answer from the scree plot only when the variance tab is active.",
+        "Do not describe kernel controls on the PCA page.",
+    ],
+)
+
 st.session_state["pca_context"] = {
+    "page": "pca",
+    "section": active_tab,
     "dataset_name": dataset_name,
     "n_components": k,
-    "explained_variance_ratio": pca_result.explained_variance[:k],
-    "cumulative_explained_variance": pca_result.cumulative_variance[:k],
-    "eigenvalues": pca_result.eigenvalues[:k],
+    "selected_pc": selected_pc_label,
+    "label_col": current_label_col,
+    "view_mode": current_view_mode,
+    "explained_variance_ratio": [float(v) for v in pca_result.explained_variance[:k]],
+    "cumulative_explained_variance": [float(v) for v in pca_result.cumulative_variance[:k]],
+    "eigenvalues": [float(v) for v in pca_result.eigenvalues[:k]],
+    "feature_names": list(pca_result.feature_names),
+    "top_loadings": top_loadings,
+    "summary": (
+        f"User is on PCA tab '{active_tab}' with k={k}, "
+        f"selected component {selected_pc_label}, dataset={dataset_name}."
+    ),
 }
 
 st.markdown(

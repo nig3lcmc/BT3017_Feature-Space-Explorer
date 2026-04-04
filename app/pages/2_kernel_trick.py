@@ -1,5 +1,6 @@
 from pathlib import Path
 import sys
+import json
 
 import numpy as np
 import pandas as pd
@@ -15,8 +16,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.append(str(PROJECT_ROOT))
 
-from src.llm.client import is_ollama_running
-from src.llm.tutor import ask_tutor
 from src.content.kernel_theory import (
     render_linear_separability_theory,
     render_feature_map_theory,
@@ -26,8 +25,28 @@ from src.content.kernel_theory import (
     render_kernel_pca_bridge_theory,
     render_kernel_specific_theory,
 )
+from src.llm.client import is_ollama_running
+from src.llm.tutor import ask_tutor
+from src.llm.context_builder import set_page_context
+from app.components.sidebar_tutor import render_sidebar_tutor
 
-import json
+
+# =========================================================
+# Page bootstrapping for tutor
+# =========================================================
+st.session_state["current_page"] = "kernel"
+
+set_page_context(
+    page="kernel",
+    section="loading",
+    visible_elements=["kernel page header", "kernel selector", "dataset controls"],
+    hidden_elements=["no step content selected yet"],
+    controls={},
+    chart_summary="The kernel lesson page is open.",
+    notes=["Do not mention a chart unless it is actually visible."],
+)
+
+render_sidebar_tutor()
 
 
 # =========================================================
@@ -41,6 +60,7 @@ def init_kernel_state():
         "kernel_lifted_state": None,
         "kernel_boundary_explanation": None,
         "kernel_boundary_state": None,
+        "kernel_active_step": "step1",
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -61,18 +81,33 @@ def generate_xor_dataset(n_samples: int = 300, noise: float = 0.08, random_state
 def generate_teaching_dataset(kernel_name: str, n_samples: int, noise: float, random_state: int = 42):
     if kernel_name == "Linear":
         X, y = make_blobs(
-            n_samples=n_samples, centers=[(-1.6, -0.8), (1.4, 0.9)],
-            cluster_std=0.75 + noise, random_state=random_state,
+            n_samples=n_samples,
+            centers=[(-1.6, -0.8), (1.4, 0.9)],
+            cluster_std=0.75 + noise,
+            random_state=random_state,
         )
         dataset_name = "blobs"
     elif kernel_name == "Polynomial":
-        X, y = generate_xor_dataset(n_samples=n_samples, noise=max(0.03, noise), random_state=random_state)
+        X, y = generate_xor_dataset(
+            n_samples=n_samples,
+            noise=max(0.03, noise),
+            random_state=random_state,
+        )
         dataset_name = "xor"
     elif kernel_name == "RBF / Gaussian":
-        X, y = make_circles(n_samples=n_samples, factor=0.45, noise=noise, random_state=random_state)
+        X, y = make_circles(
+            n_samples=n_samples,
+            factor=0.45,
+            noise=noise,
+            random_state=random_state,
+        )
         dataset_name = "circles"
     else:
-        X, y = make_moons(n_samples=n_samples, noise=max(0.08, noise), random_state=random_state)
+        X, y = make_moons(
+            n_samples=n_samples,
+            noise=max(0.08, noise),
+            random_state=random_state,
+        )
         dataset_name = "moons"
 
     df = pd.DataFrame(X, columns=["x1", "x2"])
@@ -105,18 +140,27 @@ def make_linear_boundary_line_plot(X: np.ndarray, y: np.ndarray, model, title: s
 
     if abs(w[1]) > 1e-8:
         y_vals = -(w[0] * x_vals + b) / w[1]
-        # Clamp to plot range so the line doesn't shoot off screen
         in_range = (y_vals >= y_min - 0.5) & (y_vals <= y_max + 0.5)
-        fig.add_trace(go.Scatter(
-            x=x_vals[in_range], y=y_vals[in_range], mode="lines",
-            name="Linear boundary", line=dict(width=3, dash="dash", color="#f87171"),
-        ))
+        fig.add_trace(
+            go.Scatter(
+                x=x_vals[in_range],
+                y=y_vals[in_range],
+                mode="lines",
+                name="Linear boundary",
+                line=dict(width=3, dash="dash", color="#f87171"),
+            )
+        )
     elif abs(w[0]) > 1e-8:
         x_boundary = -b / w[0]
-        fig.add_trace(go.Scatter(
-            x=[x_boundary, x_boundary], y=[y_min, y_max], mode="lines",
-            name="Linear boundary", line=dict(width=3, dash="dash", color="#f87171"),
-        ))
+        fig.add_trace(
+            go.Scatter(
+                x=[x_boundary, x_boundary],
+                y=[y_min, y_max],
+                mode="lines",
+                name="Linear boundary",
+                line=dict(width=3, dash="dash", color="#f87171"),
+            )
+        )
 
     fig.update_xaxes(range=[x_min, x_max])
     fig.update_yaxes(range=[y_min, y_max])
@@ -125,10 +169,19 @@ def make_linear_boundary_line_plot(X: np.ndarray, y: np.ndarray, model, title: s
 
 
 def make_kernel_decision_boundary(
-    X: np.ndarray, y: np.ndarray,
-    kernel: str, gamma: float, degree: int, title: str,
+    X: np.ndarray,
+    y: np.ndarray,
+    kernel: str,
+    gamma: float,
+    degree: int,
+    title: str,
 ) -> go.Figure:
-    kernel_map = {"Linear": "linear", "Polynomial": "poly", "RBF / Gaussian": "rbf", "Sigmoid": "sigmoid"}
+    kernel_map = {
+        "Linear": "linear",
+        "Polynomial": "poly",
+        "RBF / Gaussian": "rbf",
+        "Sigmoid": "sigmoid",
+    }
     svm = SVC(kernel=kernel_map.get(kernel, "rbf"), gamma=gamma, degree=degree, C=5.0)
     svm.fit(X, y)
 
@@ -138,69 +191,119 @@ def make_kernel_decision_boundary(
     Z = svm.predict(np.c_[xx.ravel(), yy.ravel()]).reshape(xx.shape)
 
     fig = go.Figure()
-    fig.add_trace(go.Contour(
-        x=np.linspace(x_min, x_max, 300),
-        y=np.linspace(y_min, y_max, 300),
-        z=Z, showscale=False,
-        colorscale=[[0, "rgba(99,102,241,0.18)"], [1, "rgba(251,146,60,0.18)"]],
-        contours=dict(showlines=False),
-        name="Decision region",
-    ))
+    fig.add_trace(
+        go.Contour(
+            x=np.linspace(x_min, x_max, 300),
+            y=np.linspace(y_min, y_max, 300),
+            z=Z,
+            showscale=False,
+            colorscale=[[0, "rgba(99,102,241,0.18)"], [1, "rgba(251,146,60,0.18)"]],
+            contours=dict(showlines=False),
+            name="Decision region",
+        )
+    )
 
     df_plot = pd.DataFrame(X, columns=["x1", "x2"])
     df_plot["target"] = y.astype(str)
     for label, color in [("0", "#818cf8"), ("1", "#fb923c")]:
         subset = df_plot[df_plot["target"] == label]
-        fig.add_trace(go.Scatter(
-            x=subset["x1"], y=subset["x2"], mode="markers",
-            name=f"Class {label}",
-            marker=dict(size=5, color=color, line=dict(width=0.5, color="white")),
-        ))
+        fig.add_trace(
+            go.Scatter(
+                x=subset["x1"],
+                y=subset["x2"],
+                mode="markers",
+                name=f"Class {label}",
+                marker=dict(size=5, color=color, line=dict(width=0.5, color="white")),
+            )
+        )
 
     sv = svm.support_vectors_
-    fig.add_trace(go.Scatter(
-        x=sv[:, 0], y=sv[:, 1], mode="markers", name="Support vectors",
-        marker=dict(size=9, color="rgba(0,0,0,0)", symbol="circle",
-                    line=dict(width=2, color="white")),
-    ))
+    fig.add_trace(
+        go.Scatter(
+            x=sv[:, 0],
+            y=sv[:, 1],
+            mode="markers",
+            name="Support vectors",
+            marker=dict(
+                size=9,
+                color="rgba(0,0,0,0)",
+                symbol="circle",
+                line=dict(width=2, color="white"),
+            ),
+        )
+    )
 
-    fig.update_layout(title=title, height=420, margin=dict(l=0, r=0, t=50, b=0),
-                      legend_title_text="", xaxis_range=[x_min, x_max], yaxis_range=[y_min, y_max])
+    fig.update_layout(
+        title=title,
+        height=420,
+        margin=dict(l=0, r=0, t=50, b=0),
+        legend_title_text="",
+        xaxis_range=[x_min, x_max],
+        yaxis_range=[y_min, y_max],
+    )
     return fig
 
 
 def make_3d_lifted_plot(
-    df: pd.DataFrame, title: str, camera_eye: dict,
-    show_plane: bool = False, plane_z: float | None = None,
+    df: pd.DataFrame,
+    title: str,
+    camera_eye: dict,
+    show_plane: bool = False,
+    plane_z: float | None = None,
 ) -> go.Figure:
     fig = go.Figure()
     for target in sorted(df["target"].unique()):
         subset = df[df["target"] == target]
-        fig.add_trace(go.Scatter3d(
-            x=subset["x1"], y=subset["x2"], z=subset["r_squared"],
-            mode="markers", name=f"Class {target}", marker=dict(size=3),
-        ))
+        fig.add_trace(
+            go.Scatter3d(
+                x=subset["x1"],
+                y=subset["x2"],
+                z=subset["r_squared"],
+                mode="markers",
+                name=f"Class {target}",
+                marker=dict(size=3),
+            )
+        )
 
     if show_plane and plane_z is not None:
         x_range = np.linspace(df["x1"].min() - 0.1, df["x1"].max() + 0.1, 20)
         y_range = np.linspace(df["x2"].min() - 0.1, df["x2"].max() + 0.1, 20)
         xx, yy = np.meshgrid(x_range, y_range)
         zz = np.full_like(xx, plane_z, dtype=float)
-        fig.add_trace(go.Surface(x=xx, y=yy, z=zz, opacity=0.32, showscale=False, name="Separating plane"))
+        fig.add_trace(
+            go.Surface(
+                x=xx,
+                y=yy,
+                z=zz,
+                opacity=0.32,
+                showscale=False,
+                name="Separating plane",
+            )
+        )
 
-    fig.update_layout(title=title, height=480, margin=dict(l=0, r=0, t=50, b=0),
-                      scene=dict(xaxis_title="x1", yaxis_title="x2", zaxis_title="r²",
-                                 camera=dict(eye=camera_eye)))
+    fig.update_layout(
+        title=title,
+        height=480,
+        margin=dict(l=0, r=0, t=50, b=0),
+        scene=dict(
+            xaxis_title="x1",
+            yaxis_title="x2",
+            zaxis_title="r²",
+            camera=dict(eye=camera_eye),
+        ),
+    )
     return fig
 
 
 def make_radial_view(df: pd.DataFrame, title: str) -> go.Figure:
     rng = np.random.default_rng(42)
-    radial_df = pd.DataFrame({
-        "r_squared": df["r_squared"],
-        "target": df["target"],
-        "jitter": rng.normal(0, 0.035, size=len(df)),
-    })
+    radial_df = pd.DataFrame(
+        {
+            "r_squared": df["r_squared"],
+            "target": df["target"],
+            "jitter": rng.normal(0, 0.035, size=len(df)),
+        }
+    )
     fig = px.scatter(radial_df, x="r_squared", y="jitter", color="target", title=title)
     fig.update_yaxes(showticklabels=False, title_text="")
     fig.update_layout(height=380, margin=dict(l=0, r=0, t=50, b=0), legend_title_text="")
@@ -217,24 +320,26 @@ def make_similarity_curve_plot(df: pd.DataFrame, gamma: float, title: str) -> go
 
 
 def make_interaction_feature_scatter(df: pd.DataFrame) -> go.Figure:
-    """
-    Plot x1*x2 (the interaction term the polynomial kernel implicitly creates)
-    vs x1 — this clearly shows why XOR becomes linearly separable.
-    The two classes separate on the x1*x2 axis alone.
-    """
-    interaction_df = pd.DataFrame({
-        "x1": df["x1"],
-        "x1·x2": df["x1"] * df["x2"],
-        "target": df["target"],
-    })
+    interaction_df = pd.DataFrame(
+        {
+            "x1": df["x1"],
+            "x1·x2": df["x1"] * df["x2"],
+            "target": df["target"],
+        }
+    )
     fig = px.scatter(
-        interaction_df, x="x1", y="x1·x2", color="target",
+        interaction_df,
+        x="x1",
+        y="x1·x2",
+        color="target",
         title="Lifted Feature: x₁ · x₂ (the interaction term)",
         labels={"x1·x2": "x₁ · x₂ (interaction term)"},
     )
-    # Add a horizontal separator at y=0 to show the classes split there
     fig.add_hline(
-        y=0, line_dash="dash", line_color="#4ade80", line_width=2,
+        y=0,
+        line_dash="dash",
+        line_color="#4ade80",
+        line_width=2,
         annotation_text="y = 0 separates the classes",
         annotation_position="top right",
     )
@@ -247,7 +352,8 @@ def make_interaction_feature_scatter(df: pd.DataFrame) -> go.Figure:
 # =========================================================
 KERNEL_INFO = {
     "Linear": {
-        "icon": "📐", "color": "#38bdf8",
+        "icon": "📐",
+        "color": "#38bdf8",
         "latex": r"K(x,\, x') = x^T x'",
         "tag": "no lifting",
         "desc": "No implicit lifting — uses the raw dot product. Best when classes are already close to linearly separable.",
@@ -256,7 +362,8 @@ KERNEL_INFO = {
         "dataset_note": "We use <strong>blobs</strong> — two well-separated clusters — where a straight line suffices.",
     },
     "Polynomial": {
-        "icon": "🔢", "color": "#a855f7",
+        "icon": "🔢",
+        "color": "#a855f7",
         "latex": r"K(x,\, x') = (x^T x' + 1)^d",
         "tag": "interaction terms",
         "desc": "Captures feature interactions and curved boundaries by implicitly computing cross-terms.",
@@ -265,7 +372,8 @@ KERNEL_INFO = {
         "dataset_note": "We use <strong>XOR</strong> — neither x₁ nor x₂ alone predicts the class, but their product does.",
     },
     "RBF / Gaussian": {
-        "icon": "🔵", "color": "#4ade80",
+        "icon": "🔵",
+        "color": "#4ade80",
         "latex": r"K(x,\, x') = \exp\!\left(-\gamma\,\|x - x'\|^2\right)",
         "tag": "∞-dim implicit map",
         "desc": "Measures similarity via Gaussian decay of Euclidean distance. Corresponds to an ∞-dimensional implicit map.",
@@ -274,7 +382,8 @@ KERNEL_INFO = {
         "dataset_note": "We use <strong>concentric circles</strong> — perfectly suited to radial (distance-based) similarity.",
     },
     "Sigmoid": {
-        "icon": "〰️", "color": "#f87171",
+        "icon": "〰️",
+        "color": "#f87171",
         "latex": r"K(x,\, x') = \tanh(\alpha\, x^T x' + c)",
         "tag": "use with caution",
         "desc": "Neural-network-style activation applied as a kernel. Not always a valid kernel (Mercer's theorem).",
@@ -380,8 +489,12 @@ def maybe_render_ai_explanation(*, button_key, state_key, state_snapshot_key, sn
         else:
             with st.spinner("Generating explanation..."):
                 try:
-                    explanation = ask_tutor(question=question, topic="kernel trick",
-                                            chat_history=[], model="mistral")
+                    explanation = ask_tutor(
+                        question=question,
+                        topic="kernel trick",
+                        chat_history=[],
+                        model="mistral",
+                    )
                     st.session_state[state_key] = explanation
                     st.session_state[state_snapshot_key] = snapshot
                 except Exception as exc:
@@ -399,33 +512,40 @@ def maybe_render_ai_explanation(*, button_key, state_key, state_snapshot_key, sn
 
 
 # =========================================================
-# Step progress bar
+# Single custom step selector
 # =========================================================
-def render_progress(active: int):
-    steps = ["🔍 Step 1: The Problem", "✨ Step 2: Apply the Kernel", "🧠 Step 3: Understand Why"]
+STEP_META = [
+    ("step1", "🔍 Step 1: The Problem"),
+    ("step2", "✨ Step 2: Apply the Kernel"),
+    ("step3", "🧠 Step 3: Understand Why"),
+]
+
+
+def render_step_selector():
+    st.markdown("### Work through the lesson")
     cols = st.columns(3)
-    for i, (col, label) in enumerate(zip(cols, steps)):
-        with col:
-            is_active = i == active
-            bg = "#4ade80" if is_active else "#1e293b"
-            fg = "#0f172a" if is_active else "#475569"
-            st.markdown(
-                f'<div style="background:{bg};border-radius:10px;padding:9px 12px;text-align:center;'
-                f'color:{fg};font-weight:{"700" if is_active else "500"};font-size:.85rem;">{label}</div>',
-                unsafe_allow_html=True,
-            )
-    st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+    for col, (step_id, label) in zip(cols, STEP_META):
+        active = st.session_state["kernel_active_step"] == step_id
+        if col.button(
+            label,
+            key=f"kernel_step_btn_{step_id}",
+            use_container_width=True,
+            type="primary" if active else "secondary",
+        ):
+            if st.session_state["kernel_active_step"] != step_id:
+                st.session_state["kernel_active_step"] = step_id
+                st.rerun()
 
 
 # =========================================================
 # Page
 # =========================================================
+init_kernel_state()
+
 st.title("🌀 Kernel Trick")
 st.write(
-    "Kernels implicitly map data into higher dimensions — turning unseparable problems into separable ones without ever computing the transformation. "
+    "Kernels implicitly map data into higher dimensions — turning unseparable problems into separable ones without ever computing the transformation."
 )
-
-init_kernel_state()
 
 with st.expander("🧩 Why do we need kernels?", expanded=False):
     st.markdown(
@@ -451,19 +571,17 @@ while still training from pairwise similarities alone.
 """
     )
 
-init_kernel_state()
-
-# ── Kernel selector ───────────────────────────────────────
 st.markdown("### Choose a kernel to study")
 kernel_name = st.radio(
-    "kernel", options=list(KERNEL_INFO.keys()), horizontal=True,
+    "kernel",
+    options=list(KERNEL_INFO.keys()),
+    horizontal=True,
     label_visibility="collapsed",
     format_func=lambda k: f"{KERNEL_INFO[k]['icon']} {k}",
 )
 
 st.divider()
 
-# ── Dataset controls ──────────────────────────────────────
 with st.expander("⚙️ Dataset controls", expanded=False):
     c1, c2 = st.columns(2)
     with c1:
@@ -478,7 +596,6 @@ with st.expander("⚙️ Dataset controls", expanded=False):
         st.caption("High γ → tighter, more complex boundary. Low γ → smoother, more global.")
     elif kernel_name == "Polynomial":
         degree = st.slider("Polynomial degree", min_value=2, max_value=6, value=2, step=1)
-        # Import helper locally so caption is always correct for this degree
         from src.content.kernel_theory import _poly_dim
         _dim = _poly_dim(degree)
         st.caption(
@@ -486,37 +603,58 @@ with st.expander("⚙️ Dataset controls", expanded=False):
             f"Includes all monomials $x_1^a x_2^b$ where $a+b \\leq {degree}$, plus the bias term."
         )
 
-dataset_name, df = generate_teaching_dataset(kernel_name=kernel_name, n_samples=n_samples, noise=noise)
-
-st.session_state["current_page"] = "kernel trick"
-st.session_state["kernel_context"] = {
-    "kernel_name": kernel_name, "dataset_name": dataset_name,
-    "n_samples": n_samples, "noise": noise, "gamma": gamma, "degree": degree,
-}
+dataset_name, df = generate_teaching_dataset(
+    kernel_name=kernel_name,
+    n_samples=n_samples,
+    noise=noise,
+)
 
 X = df[["x1", "x2"]].values
 y = df["target"].astype(int).values
 
-# Bug fix: use lbfgs solver which is more stable at large n_samples,
-# and increase max_iter to ensure convergence regardless of sample count.
 linear_model = LogisticRegression(solver="lbfgs", max_iter=5000, C=1.0)
 linear_model.fit(X, y)
 
-# ── Kernel header card ────────────────────────────────────
 render_kernel_header(kernel_name, gamma, degree)
+render_step_selector()
+
+active_step = st.session_state["kernel_active_step"]
+
 
 # =========================================================
-# 3-step tabs
+# STEP 1
 # =========================================================
-tab1, tab2, tab3 = st.tabs(
-    ["🔍 Step 1: The Problem", "✨ Step 2: Apply the Kernel", "🧠 Step 3: Understand Why"]
-)
-
-# ──────────────────────────────────────────────────────────
-# TAB 1 — The Problem
-# ──────────────────────────────────────────────────────────
-with tab1:
-    render_progress(active=0)
+if active_step == "step1":
+    set_page_context(
+        page="kernel",
+        section="step 1 - the problem",
+        visible_elements=[
+            "step selector",
+            "raw data scatter plot",
+            "best straight-line boundary plot",
+        ],
+        hidden_elements=[
+            "no kernel decision boundary plot yet",
+            "no plot svm button",
+            "no visualize tab",
+        ],
+        controls={
+            "kernel_name": kernel_name,
+            "dataset_name": dataset_name,
+            "n_samples": n_samples,
+            "noise": noise,
+            "gamma": gamma if kernel_name == "RBF / Gaussian" else None,
+            "degree": degree if kernel_name == "Polynomial" else None,
+        },
+        chart_summary=(
+            f"The raw {dataset_name} dataset is shown with a straight-line boundary attempt. "
+            f"This step motivates why the {kernel_name} kernel may be needed."
+        ),
+        notes=[
+            "Do not say the user is on Step 2 or Step 3.",
+            "Do not mention a kernel decision boundary yet.",
+        ],
+    )
 
     st.markdown(
         f"### Can a straight line separate this data?\n\n"
@@ -527,25 +665,39 @@ with tab1:
 
     col_left, col_right = st.columns(2)
     with col_left:
-        st.plotly_chart(make_original_scatter(df, f"Raw Data: {dataset_name.title()}"),
-                        use_container_width=True)
+        st.plotly_chart(
+            make_original_scatter(df, f"Raw Data: {dataset_name.title()}"),
+            use_container_width=True,
+        )
     with col_right:
-        st.plotly_chart(make_linear_boundary_line_plot(X, y, linear_model, "Best Straight-Line Boundary"),
-                        use_container_width=True)
+        st.plotly_chart(
+            make_linear_boundary_line_plot(X, y, linear_model, "Best Straight-Line Boundary"),
+            use_container_width=True,
+        )
 
     render_linear_separability_theory()
 
     if kernel_name == "Linear":
-        st.success("✅ **Linear kernel works here.** The blobs are well-separated — a straight line does the job. No nonlinear transformation needed.")
+        st.success(
+            "✅ **Linear kernel works here.** The blobs are well-separated — a straight line does the job. "
+            "No nonlinear transformation is needed."
+        )
     else:
-        st.error(f"❌ **Linear classifier fails here.** The {dataset_name} structure cannot be separated by a straight line. This is exactly the problem the **{kernel_name} kernel** solves.")
+        st.error(
+            f"❌ **Linear classifier fails here.** The {dataset_name} structure cannot be separated "
+            f"by a straight line. This is exactly the problem the **{kernel_name} kernel** solves."
+        )
 
     maybe_render_ai_explanation(
         button_key="explain_tab1",
         state_key="kernel_original_explanation",
         state_snapshot_key="kernel_original_state",
-        snapshot={"kernel_name": kernel_name, "dataset_name": dataset_name,
-                  "n_samples": n_samples, "noise": noise},
+        snapshot={
+            "kernel_name": kernel_name,
+            "dataset_name": dataset_name,
+            "n_samples": n_samples,
+            "noise": noise,
+        },
         question=(
             f"We're teaching undergraduates about the kernel trick using the {dataset_name} dataset "
             f"and the {kernel_name} kernel. Explain why a linear classifier "
@@ -553,14 +705,43 @@ with tab1:
             f"and what intuition that builds for why a kernel is needed."
         ),
     )
+
     st.info("👉 Move to **Step 2** to see the kernel boundary in action.")
 
 
-# ──────────────────────────────────────────────────────────
-# TAB 2 — Apply the Kernel
-# ──────────────────────────────────────────────────────────
-with tab2:
-    render_progress(active=1)
+# =========================================================
+# STEP 2
+# =========================================================
+elif active_step == "step2":
+    set_page_context(
+        page="kernel",
+        section="step 2 - apply the kernel",
+        visible_elements=[
+            "step selector",
+            "kernel decision boundary plot",
+            "support vector markers",
+        ],
+        hidden_elements=[
+            "no plot svm button",
+            "no visualize tab",
+        ],
+        controls={
+            "kernel_name": kernel_name,
+            "dataset_name": dataset_name,
+            "n_samples": n_samples,
+            "noise": noise,
+            "gamma": gamma if kernel_name == "RBF / Gaussian" else None,
+            "degree": degree if kernel_name == "Polynomial" else None,
+        },
+        chart_summary=(
+            f"The {kernel_name} kernel is applied to the {dataset_name} dataset. "
+            f"This step shows how the decision boundary changes after using the kernel."
+        ),
+        notes=[
+            "Do not invent a Visualize tab.",
+            "Do not invent a Plot SVM button.",
+        ],
+    )
 
     st.markdown(
         f"### The {kernel_name} kernel finds a boundary a straight line cannot.\n\n"
@@ -569,13 +750,20 @@ with tab2:
     )
 
     st.plotly_chart(
-        make_kernel_decision_boundary(X, y, kernel_name, gamma=gamma, degree=degree,
-                                      title=f"{kernel_name} Kernel SVM — Decision Boundary"),
+        make_kernel_decision_boundary(
+            X,
+            y,
+            kernel_name,
+            gamma=gamma,
+            degree=degree,
+            title=f"{kernel_name} Kernel SVM — Decision Boundary",
+        ),
         use_container_width=True,
     )
-    st.caption("Circled points are **support vectors** — the training points closest to the boundary that define where it sits.")
+    st.caption(
+        "Circled points are **support vectors** — the training points closest to the boundary that define where it sits."
+    )
 
-    # ── Kernel-specific lifting / insight visuals ──────────
     if kernel_name == "RBF / Gaussian":
         st.markdown("---")
         st.markdown("### Why does RBF work? Adding a dimension.")
@@ -587,27 +775,32 @@ with tab2:
         c1, c2 = st.columns(2)
         class_means = df.groupby("target")["r_squared"].mean().sort_values()
         plane_z = float((class_means.iloc[0] + class_means.iloc[-1]) / 2.0)
+
         with c1:
             st.plotly_chart(
-                make_3d_lifted_plot(df, "Top View — Lifted Space",
-                                    camera_eye={"x": 0.0, "y": 0.0, "z": 2.35}),
+                make_3d_lifted_plot(
+                    df,
+                    "Top View — Lifted Space",
+                    camera_eye={"x": 0.0, "y": 0.0, "z": 2.35},
+                ),
                 use_container_width=True,
             )
         with c2:
             st.plotly_chart(
-                make_3d_lifted_plot(df, "Side View — Plane Separates the Classes",
-                                    camera_eye={"x": 2.0, "y": 0.2, "z": 0.25},
-                                    show_plane=True, plane_z=plane_z),
+                make_3d_lifted_plot(
+                    df,
+                    "Side View — Plane Separates the Classes",
+                    camera_eye={"x": 2.0, "y": 0.2, "z": 0.25},
+                    show_plane=True,
+                    plane_z=plane_z,
+                ),
                 use_container_width=True,
             )
+
         st.plotly_chart(make_radial_view(df, "Collapsed to 1D: Radial Feature"), use_container_width=True)
         st.plotly_chart(
             make_similarity_curve_plot(df, gamma, f"RBF Similarity vs Radius (γ = {gamma:.2f})"),
             use_container_width=True,
-        )
-        st.caption(
-            f"With γ = {gamma:.2f}, similarity drops quickly with distance. "
-            "Try increasing γ — notice how the boundary tightens around each cluster."
         )
 
     elif kernel_name == "Polynomial":
@@ -650,40 +843,72 @@ with tab2:
         button_key="explain_tab2",
         state_key="kernel_lifted_explanation",
         state_snapshot_key="kernel_lifted_state",
-        snapshot={"kernel_name": kernel_name, "dataset_name": dataset_name,
-                  "n_samples": n_samples, "noise": noise, "gamma": gamma, "degree": degree},
+        snapshot={
+            "kernel_name": kernel_name,
+            "dataset_name": dataset_name,
+            "n_samples": n_samples,
+            "noise": noise,
+            "gamma": gamma,
+            "degree": degree,
+        },
         question=(
             f"Explain the {kernel_name} SVM decision boundary and any lifting visualisations "
-            f"for the {dataset_name} dataset. Cover: what the coloured regions mean, "
-            f"what support vectors are, and how the kernel achieves this without "
-            f"explicitly computing new features."
+            f"for the {dataset_name} dataset. Cover what the coloured regions mean, "
+            f"what support vectors are, and how the kernel achieves this without explicitly computing new features."
         ),
     )
+
     st.info("👉 Move to **Step 3** to understand the math behind this.")
 
 
-# ──────────────────────────────────────────────────────────
-# TAB 3 — Understand Why (kernel-specific)
-# ──────────────────────────────────────────────────────────
-with tab3:
-    render_progress(active=2)
+# =========================================================
+# STEP 3
+# =========================================================
+else:
+    set_page_context(
+        page="kernel",
+        section="step 3 - understand why",
+        visible_elements=[
+            "step selector",
+            "kernel theory explanation",
+            "general theory section",
+            "kernel comparison table",
+        ],
+        hidden_elements=[
+            "no visualize tab",
+            "no plot svm button",
+        ],
+        controls={
+            "kernel_name": kernel_name,
+            "dataset_name": dataset_name,
+            "gamma": gamma if kernel_name == "RBF / Gaussian" else None,
+            "degree": degree if kernel_name == "Polynomial" else None,
+        },
+        chart_summary=(
+            f"This step explains why the {kernel_name} kernel works for the {dataset_name} dataset."
+        ),
+        notes=[
+            "Do not claim the user is on Step 1 or Step 2.",
+        ],
+    )
 
     st.markdown(f"### The math behind the **{kernel_name} kernel**")
     st.caption("This section is tailored to the kernel you selected above.")
 
-    # ── Kernel-specific deep-dive ──────────────────────────
     render_kernel_specific_theory(kernel_name, gamma=gamma, degree=degree)
 
     st.markdown("---")
     st.markdown("### All kernels at a glance")
 
-    cheat = pd.DataFrame({
-        "Kernel":        ["Linear", "Polynomial", "RBF / Gaussian", "Sigmoid"],
-        "Implicit dims": ["d (original)", "O(dᵏ)", "∞", "depends"],
-        "Best for":      ["Linearly separable", "Feature interactions", "General nonlinear", "Teaching only"],
-        "Key parameter": ["—", "degree d", "γ (gamma)", "α, c"],
-        "Mercer valid?": ["✅", "✅", "✅", "⚠️ Not always"],
-    })
+    cheat = pd.DataFrame(
+        {
+            "Kernel": ["Linear", "Polynomial", "RBF / Gaussian", "Sigmoid"],
+            "Implicit dims": ["d (original)", "O(dᵏ)", "∞", "depends"],
+            "Best for": ["Linearly separable", "Feature interactions", "General nonlinear", "Teaching only"],
+            "Key parameter": ["—", "degree d", "γ (gamma)", "α, c"],
+            "Mercer valid?": ["✅", "✅", "✅", "⚠️ Not always"],
+        }
+    )
     st.dataframe(cheat, use_container_width=True, hide_index=True)
 
     st.markdown("---")

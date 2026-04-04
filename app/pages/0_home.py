@@ -2,11 +2,26 @@ from pathlib import Path
 import sys
 
 import streamlit as st
+from app.components.sidebar_tutor import render_sidebar_tutor
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.append(str(PROJECT_ROOT))
 
+st.session_state["current_page"] = "home"
+st.session_state["tutor_context"] = {
+    "section": "home",
+    "visible_elements": [
+        "home page title",
+        "module overview",
+    ],
+    "hidden_elements": [
+        "no charts visible",
+    ],
+    "controls": {},
+    "chart_summary": "No chart is visible on the home page.",
+    "summary": "User is on the home page.",
+}
 
 st.title("📊 Feature Space Explorer")
 st.subheader("An interactive learning tool for feature engineering, kernel mapping, and PCA")

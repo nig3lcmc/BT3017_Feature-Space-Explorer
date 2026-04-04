@@ -1,90 +1,90 @@
 from __future__ import annotations
 
+import json
+from typing import Any
+
 import streamlit as st
 
 
-def build_tutor_messages(topic: str, question: str) -> list[dict[str, str]]:
-    topic = topic.strip().lower()
+def set_page_context(
+    *,
+    page: str,
+    section: str | None = None,
+    visible_elements: list[str] | None = None,
+    hidden_elements: list[str] | None = None,
+    controls: dict[str, Any] | None = None,
+    chart_summary: str | None = None,
+    notes: list[str] | None = None,
+) -> None:
+    """
+    Store a grounded UI snapshot for the tutor.
+    Pages should call this whenever the visible state changes.
+    """
+    current = st.session_state.get("tutor_context", {})
 
-    if topic == "preprocessing":
-        system_prompt = (
-            "You are a helpful machine learning tutor for undergraduate students. "
-            "Explain preprocessing concepts such as scaling, normalization, "
-            "standardization, missing values, feature distributions, and correlations. "
-            "Be accurate, clear, and beginner-friendly."
-        )
-    elif topic == "kernel":
-        system_prompt = (
-            "You are a helpful machine learning tutor for undergraduate students. "
-            "Explain nonlinear separability, feature mapping, polynomial features, "
-            "and the intuition behind the kernel trick. "
-            "Be accurate, clear, and beginner-friendly."
-        )
-    elif topic == "pca":
-        system_prompt = (
-            "You are a helpful machine learning tutor for undergraduate students. "
-            "Explain dimensionality reduction, explained variance, principal components, "
-            "covariance, eigenvectors, and when PCA is useful. "
-            "Be accurate, clear, and beginner-friendly."
-        )
-    else:
-        system_prompt = (
-            "You are a helpful machine learning tutor for undergraduate students. "
-            "Be accurate, clear, and beginner-friendly."
-        )
+    current["page"] = page
+    if section is not None:
+        current["section"] = section
+    if visible_elements is not None:
+        current["visible_elements"] = visible_elements
+    if hidden_elements is not None:
+        current["hidden_elements"] = hidden_elements
+    if controls is not None:
+        current["controls"] = controls
+    if chart_summary is not None:
+        current["chart_summary"] = chart_summary
+    if notes is not None:
+        current["notes"] = notes
 
-    return [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": question},
-    ]
+    st.session_state["tutor_context"] = _json_safe(current)
 
 
-def build_context_summary(topic: str) -> str:
-    topic = topic.strip().lower()
+def get_current_page() -> str:
+    return st.session_state.get("current_page", "home")
 
-    if topic == "preprocessing":
-        ctx = st.session_state.get("preprocessing_context", {})
-        chart_ctx = st.session_state.get("preprocessing_chart_context", {})
-        if not ctx:
-            return "No preprocessing context available."
 
-        return (
-            f"Page: Preprocessing\n"
-            f"Dataset: {ctx.get('dataset_name', 'unknown')}\n"
-            f"Scaling method: {ctx.get('scaling_method', 'unknown')}\n"
-            f"Selected features: {ctx.get('selected_features', [])}\n"
-            f"Feature visualized: {ctx.get('feature_to_plot', 'none')}\n"
-            f"Chart context: {chart_ctx}"
-        )
+def get_tutor_context() -> dict[str, Any]:
+    """
+    Returns the current grounded tutor context.
+    """
+    ctx = st.session_state.get("tutor_context", {})
+    if not ctx:
+        return {"page": get_current_page()}
+    return _json_safe(ctx)
 
-    if topic == "kernel":
-        ctx = st.session_state.get("kernel_context", {})
-        chart_ctx = st.session_state.get("kernel_chart_context", {})
-        if not ctx:
-            return "No kernel context available."
 
-        return (
-            f"Page: Kernel Trick\n"
-            f"Dataset: {ctx.get('dataset_name', 'unknown')}\n"
-            f"Samples: {ctx.get('n_samples', 'unknown')}\n"
-            f"Noise: {ctx.get('noise', 'unknown')}\n"
-            f"Mapping: {ctx.get('mapping', 'unknown')}\n"
-            f"Chart context: {chart_ctx}"
-        )
+def get_tutor_context_json() -> str:
+    return json.dumps(get_tutor_context(), indent=2, ensure_ascii=False)
 
-    if topic == "pca":
-        ctx = st.session_state.get("pca_context", {})
-        chart_ctx = st.session_state.get("pca_chart_context", {})
-        if not ctx:
-            return "No PCA context available."
 
-        return (
-            f"Page: PCA\n"
-            f"Dataset: {ctx.get('dataset_name', 'unknown')}\n"
-            f"Components: {ctx.get('n_components', 'unknown')}\n"
-            f"Explained variance ratio: {ctx.get('explained_variance_ratio', [])}\n"
-            f"Cumulative explained variance: {ctx.get('cumulative_explained_variance', [])}\n"
-            f"Chart context: {chart_ctx}"
-        )
+def build_grounding_block() -> str:
+    ctx = get_tutor_context()
+    page = ctx.get("page", "unknown")
+    section = ctx.get("section", "unknown")
+    visible = ctx.get("visible_elements", [])
+    hidden = ctx.get("hidden_elements", [])
+    controls = ctx.get("controls", {})
+    chart_summary = ctx.get("chart_summary", "No chart summary available.")
+    notes = ctx.get("notes", [])
 
-    return "No context available."
+    return (
+        f"Current page: {page}\n"
+        f"Current section: {section}\n"
+        f"Visible elements: {visible}\n"
+        f"Hidden or absent elements: {hidden}\n"
+        f"Current controls: {controls}\n"
+        f"Chart summary: {chart_summary}\n"
+        f"Notes: {notes}\n"
+    )
+
+
+def _json_safe(obj: Any) -> Any:
+    if isinstance(obj, dict):
+        return {str(k): _json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_json_safe(v) for v in obj]
+    if isinstance(obj, tuple):
+        return [_json_safe(v) for v in obj]
+    if isinstance(obj, (str, int, float, bool)) or obj is None:
+        return obj
+    return str(obj)

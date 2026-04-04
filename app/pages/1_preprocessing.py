@@ -48,7 +48,12 @@ from src.data.sample_datasets import (
     load_uploaded_dataset,
 )
 from src.features.preprocessing import scale_numeric_features, summarize_dataframe
+from app.components.sidebar_tutor import render_sidebar_tutor
 
+from app.components.sidebar_tutor import render_sidebar_tutor
+
+st.session_state["current_page"] = "preprocessing"
+render_sidebar_tutor()
 
 st.title("🛠️ Preprocessing Pipeline")
 st.write("A guided workflow to understand, clean, transform, and export your dataset.")
@@ -708,15 +713,58 @@ st.session_state["processed_df_source"] = dataset_name
 st.session_state["current_page"] = "preprocessing"
 
 st.session_state["preprocessing_context"] = {
+    "page": "preprocessing",
     "dataset_name": dataset_name,
-    "missing_option": st.session_state.get("missing_option"),
-    "outlier_method": st.session_state.get("outlier_method"),
-    "outlier_cols": st.session_state.get("outlier_cols", []),
-    "encode_method": st.session_state.get("encode_method"),
-    "encode_cols": st.session_state.get("encode_cols", []),
-    "scaling_method": st.session_state.get("scaling_method"),
-    "power_method": st.session_state.get("power_method"),
-    "transform_cols": st.session_state.get("transform_cols", []),
+    "section": "preprocessing pipeline",
+    "missing_option": missing_option if "missing_option" in locals() else None,
+    "missing_before": missing_before if "missing_before" in locals() else None,
+    "missing_after": missing_after if "missing_after" in locals() else None,
+    "convert_numeric_cols": convert_numeric_cols if "convert_numeric_cols" in locals() else [],
+    "remove_duplicates": remove_duplicates if "remove_duplicates" in locals() else False,
+    "duplicate_before": duplicate_before if "duplicate_before" in locals() else None,
+    "duplicate_after": duplicate_after if "duplicate_after" in locals() else None,
+    "outlier_cols": outlier_cols if "outlier_cols" in locals() else [],
+    "outlier_method": outlier_method if "outlier_method" in locals() else None,
+    "encode_cols": encode_cols if "encode_cols" in locals() else [],
+    "encode_method": encode_method if "encode_method" in locals() else None,
+    "transform_cols": transform_cols if "transform_cols" in locals() else [],
+    "scaling_method": scaling_method if "scaling_method" in locals() else None,
+    "power_method": power_method if "power_method" in locals() else None,
+    "final_rows": int(df_transformed.shape[0]) if "df_transformed" in locals() else None,
+    "final_cols": int(df_transformed.shape[1]) if "df_transformed" in locals() else None,
+    "summary": (
+        f"User is on preprocessing. Dataset={dataset_name}. "
+        f"Scaling={scaling_method if 'scaling_method' in locals() else 'none'}, "
+        f"encoding={encode_method if 'encode_method' in locals() else 'none'}, "
+        f"outlier method={outlier_method if 'outlier_method' in locals() else 'none'}."
+    ),
+}
+st.session_state["current_page"] = "preprocessing"
+st.session_state["tutor_context"] = {
+    "section": "preprocessing pipeline",
+    "dataset_name": dataset_name,
+    "visible_elements": [
+        "dataset preview",
+        "preprocessing controls",
+        "transformed output",
+    ],
+    "hidden_elements": [
+        "no kernel plot",
+        "no PCA scree plot",
+    ],
+    "controls": {
+        "scaling_method": scaling_method if "scaling_method" in locals() else None,
+        "encoding_method": encode_method if "encode_method" in locals() else None,
+        "outlier_method": outlier_method if "outlier_method" in locals() else None,
+    },
+    "chart_summary": (
+        f"Dataset has {df_transformed.shape[0]} rows and {df_transformed.shape[1]} columns after preprocessing."
+        if "df_transformed" in locals() else
+        "Preprocessing controls are visible."
+    ),
+    "summary": "User is working on preprocessing and data transformation.",
 }
 
 st.success("✅ Processed dataset is ready and stored for use in other pages.")
+
+
