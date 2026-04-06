@@ -590,7 +590,7 @@ df_transformed = st.session_state["processed_df"]
 # -------------------------
 # Step 5: Processing Summary + Export
 # -------------------------
-st.markdown("## 5️⃣ Processing Summary & Export")
+st.markdown("## Processing Summary & Export")
 render_review_theory()
 
 original_rows, original_cols = df_raw.shape

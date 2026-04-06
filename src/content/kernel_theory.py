@@ -279,7 +279,7 @@ ro.observe(document.body);
 
     # Start with a generous initial height — the postMessage will shrink/grow it
     # to the exact content height once KaTeX finishes rendering.
-    components.html(html, height=400, scrolling=False)
+    components.html(html, height=480, scrolling=False)
 
 
 # ─────────────────────────────────────────────────────────────

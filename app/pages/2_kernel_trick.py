@@ -476,7 +476,7 @@ def render_kernel_header(kernel_name: str, gamma: float, degree: int) -> None:
 </script>
 </body>
 </html>"""
-    components.html(html, height=328, scrolling=False)
+    components.html(html, height=350, scrolling=False)
 
 
 # =========================================================
@@ -943,17 +943,17 @@ else:
 
     render_kernel_pca_bridge_theory()
 
-    maybe_render_ai_explanation(
-        button_key="explain_tab3",
-        state_key="kernel_boundary_explanation",
-        state_snapshot_key="kernel_boundary_state",
-        snapshot={"kernel_name": kernel_name, "gamma": gamma, "degree": degree},
-        question=(
-            f"Summarise the key theoretical ideas behind the {kernel_name} kernel for undergraduate "
-            f"students: the feature map intuition, Mercer's theorem, and when to choose this kernel "
-            f"over alternatives. Keep it clear and concrete."
-        ),
-    )
+    # maybe_render_ai_explanation(
+    #     button_key="explain_tab3",
+    #     state_key="kernel_boundary_explanation",
+    #     state_snapshot_key="kernel_boundary_state",
+    #     snapshot={"kernel_name": kernel_name, "gamma": gamma, "degree": degree},
+    #     question=(
+    #         f"Summarise the key theoretical ideas behind the {kernel_name} kernel for undergraduate "
+    #         f"students: the feature map intuition, Mercer's theorem, and when to choose this kernel "
+    #         f"over alternatives. Keep it clear and concrete."
+    #     ),
+    # )
 
     st.markdown(
         '<div style="border:1px solid rgba(74,222,128,0.45);border-radius:16px;padding:20px;'
