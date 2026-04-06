@@ -96,6 +96,3 @@ if question:
                 st.error(answer)
 
     chat_history.append({"role": "assistant", "content": answer})
-
-with st.expander("Debug Session State"):
-    st.json(dict(st.session_state))

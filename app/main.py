@@ -1,5 +1,6 @@
 from pathlib import Path
 import sys
+
 import streamlit as st
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]

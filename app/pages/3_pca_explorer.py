@@ -45,8 +45,6 @@ set_page_context(
     notes=["Do not describe a scree plot unless a dataset has been loaded."],
 )
 
-render_sidebar_tutor()
-
 
 TABS = [
     {"id": "variance", "label": "1 · Variance", "desc": "How much does each component explain?"},
@@ -224,6 +222,7 @@ uploaded_file = st.file_uploader(
     "Drop a CSV file here",
     type=["csv"],
     help="Numeric features are used for PCA. Non-numeric columns may be used as labels for colouring.",
+    key="pca_uploaded_file",
 )
 
 demo_dataset = None
@@ -234,15 +233,21 @@ if uploaded_file is None:
         options=[""] + get_available_datasets(),
         index=0,
         format_func=lambda x: "Select a demo dataset" if x == "" else x.title(),
+        key="pca_demo_dataset",
     )
 
 df = None
 dataset_name = None
+saved_df = st.session_state.get("pca_df")
+saved_dataset_name = st.session_state.get("pca_dataset_name")
 
 if uploaded_file is not None:
     try:
         df = load_uploaded_dataset(uploaded_file)
         dataset_name = f"uploaded:{uploaded_file.name}"
+        st.session_state["pca_df"] = df.copy()
+        st.session_state["pca_dataset_name"] = dataset_name
+        st.session_state["pca_dataset_source"] = "upload"
         st.success(f"Loaded uploaded dataset: {uploaded_file.name}")
     except Exception as exc:
         st.error(str(exc))
@@ -250,6 +255,13 @@ if uploaded_file is not None:
 elif demo_dataset:
     df = load_sample_dataset(demo_dataset)
     dataset_name = demo_dataset
+    st.session_state["pca_df"] = df.copy()
+    st.session_state["pca_dataset_name"] = dataset_name
+    st.session_state["pca_dataset_source"] = "demo"
+elif saved_df is not None and saved_dataset_name:
+    # Keep the current PCA view stable across tutor-triggered reruns.
+    df = saved_df.copy()
+    dataset_name = saved_dataset_name
 
 if df is None:
     set_page_context(
@@ -692,3 +704,5 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
+
+render_sidebar_tutor()

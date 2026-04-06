@@ -78,6 +78,13 @@ def build_grounding_block() -> str:
     )
 
 
+def build_context_summary(_: str | None = None) -> str:
+    """
+    Backwards-compatible alias used by the legacy tutor page.
+    """
+    return build_grounding_block()
+
+
 def _json_safe(obj: Any) -> Any:
     if isinstance(obj, dict):
         return {str(k): _json_safe(v) for k, v in obj.items()}

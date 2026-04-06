@@ -46,8 +46,6 @@ set_page_context(
     notes=["Do not mention a chart unless it is actually visible."],
 )
 
-render_sidebar_tutor()
-
 
 # =========================================================
 # Session state
@@ -964,3 +962,5 @@ else:
         'and how the kernel trick extends that to nonlinear structure.</div></div>',
         unsafe_allow_html=True,
     )
+
+render_sidebar_tutor()

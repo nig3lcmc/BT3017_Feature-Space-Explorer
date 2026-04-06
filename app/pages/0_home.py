@@ -2,26 +2,24 @@ from pathlib import Path
 import sys
 
 import streamlit as st
-from app.components.sidebar_tutor import render_sidebar_tutor
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.append(str(PROJECT_ROOT))
 
+from app.components.sidebar_tutor import render_sidebar_tutor
+from src.llm.context_builder import set_page_context
+
 st.session_state["current_page"] = "home"
-st.session_state["tutor_context"] = {
-    "section": "home",
-    "visible_elements": [
-        "home page title",
-        "module overview",
-    ],
-    "hidden_elements": [
-        "no charts visible",
-    ],
-    "controls": {},
-    "chart_summary": "No chart is visible on the home page.",
-    "summary": "User is on the home page.",
-}
+set_page_context(
+    page="home",
+    section="home",
+    visible_elements=["home page title", "module overview"],
+    hidden_elements=["no charts visible"],
+    controls={},
+    chart_summary="No chart is visible on the home page.",
+    notes=["The user is on the home page."],
+)
 
 st.title("📊 Feature Space Explorer")
 st.subheader("An interactive learning tool for feature engineering, kernel mapping, and PCA")
@@ -58,3 +56,5 @@ with col2:
     st.markdown("Ask questions and clarify concepts")
 
 st.info("Use the navigation bar at the top to explore each module.")
+
+render_sidebar_tutor()

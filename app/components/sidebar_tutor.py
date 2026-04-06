@@ -1,28 +1,55 @@
 from __future__ import annotations
 
 import uuid
+
 import streamlit as st
 
 from src.llm.client import is_ollama_running, list_models
 from src.llm.tutor import ask_tutor
+
+DEFAULT_TUTOR_MODEL = "mistral"
+NEW_CHAT_TITLE = "New chat"
+DEFAULT_SUGGESTIONS = [
+    "What does this page do?",
+    "How should I use this tool?",
+    "What should I look at first?",
+]
+PAGE_LABELS = {
+    "home": "Home",
+    "preprocessing": "Preprocessing",
+    "kernel": "Kernel Trick",
+    "kernel trick": "Kernel Trick",
+    "pca": "PCA Explorer",
+}
+PAGE_SUGGESTIONS = {
+    "preprocessing": [
+        "Why do we scale features here?",
+        "What changed after preprocessing?",
+        "When should I remove outliers?",
+    ],
+    "kernel": [
+        "Why does this kernel work here?",
+        "What is the kernel trick in simple words?",
+        "How do I choose between RBF and Polynomial?",
+    ],
+    "pca": [
+        "What is the optimal k in this scree plot?",
+        "What does cumulative variance mean here?",
+        "How do I interpret this PCA plot?",
+    ],
+}
 
 
 def render_sidebar_tutor() -> None:
     _init_state()
 
     current_page = st.session_state.get("current_page", "home")
-    page_label = {
-        "home": "🏠 Home",
-        "preprocessing": "🛠️ Preprocessing",
-        "kernel": "🌀 Kernel Trick",
-        "kernel trick": "🌀 Kernel Trick",
-        "pca": "📉 PCA Explorer",
-    }.get(current_page, "🏠 Home")
+    page_label = PAGE_LABELS.get(current_page, PAGE_LABELS["home"])
 
     with st.sidebar:
         _inject_sidebar_styles()
 
-        st.markdown("## 💬 AI Tutor")
+        st.markdown("## AI Tutor")
         st.caption("Ask questions about what you're learning on this page.")
 
         st.markdown(
@@ -42,7 +69,7 @@ def render_sidebar_tutor() -> None:
 
         with st.expander("Tutor settings", expanded=False):
             available_models = list_models()
-            current_model = st.session_state.get("tutor_model", "mistral")
+            current_model = st.session_state.get("tutor_model", DEFAULT_TUTOR_MODEL)
 
             if not available_models:
                 st.info("No Ollama models found. Pull one first, e.g. `ollama pull mistral`.")
@@ -61,10 +88,10 @@ def render_sidebar_tutor() -> None:
         suggestions = _get_suggestions(current_page)
         if suggestions:
             st.markdown("**Try asking:**")
-            for i, suggestion in enumerate(suggestions[:3]):
+            for index, suggestion in enumerate(suggestions[:3]):
                 if st.button(
                     suggestion,
-                    key=f"sidebar_tutor_suggestion_{current_page}_{i}",
+                    key=f"sidebar_tutor_suggestion_{current_page}_{index}",
                     use_container_width=True,
                 ):
                     _queue_user_message(suggestion, current_page)
@@ -72,7 +99,7 @@ def render_sidebar_tutor() -> None:
 
         st.markdown("<div class='tutor-section-label'>Chats</div>", unsafe_allow_html=True)
 
-        if st.button("＋ New chat", key="sidebar_new_chat", use_container_width=True):
+        if st.button("+ New chat", key="sidebar_new_chat", use_container_width=True):
             _create_new_thread(current_page)
             st.rerun()
 
@@ -89,34 +116,32 @@ def render_sidebar_tutor() -> None:
                 label_visibility="collapsed",
                 placeholder="Enter a chat title",
             )
-            rc1, rc2 = st.columns(2)
-            with rc1:
+            save_col, reset_col = st.columns(2)
+            with save_col:
                 if st.button(
                     "Save name",
                     key=f"rename_chat_save_{active_thread['id']}",
                     use_container_width=True,
                 ):
-                    cleaned = rename_value.strip()
-                    active_thread["title"] = cleaned if cleaned else "New chat"
+                    active_thread["title"] = _normalize_title(rename_value)
                     st.session_state["open_rename_for_active"] = False
                     st.rerun()
-            with rc2:
+            with reset_col:
                 if st.button(
                     "Reset",
                     key=f"rename_chat_reset_{active_thread['id']}",
                     use_container_width=True,
                 ):
-                    active_thread["title"] = "New chat"
+                    active_thread["title"] = NEW_CHAT_TITLE
                     st.session_state["open_rename_for_active"] = False
                     st.rerun()
 
         for thread in st.session_state["tutor_threads"]:
             is_active = thread["id"] == st.session_state["active_tutor_thread_id"]
-            row_col1, row_col3 = st.columns([8, 2], gap="small")
-
+            title_col, delete_col = st.columns([8, 2], gap="small")
             display_title = _truncate_title(thread["title"], 22)
 
-            with row_col1:
+            with title_col:
                 if st.button(
                     display_title,
                     key=f"thread_select_{thread['id']}",
@@ -128,8 +153,7 @@ def render_sidebar_tutor() -> None:
                     st.session_state["open_rename_for_active"] = False
                     st.rerun()
 
-
-            with row_col3:
+            with delete_col:
                 if st.button(
                     "Del",
                     key=f"thread_delete_{thread['id']}",
@@ -140,54 +164,18 @@ def render_sidebar_tutor() -> None:
                     st.rerun()
 
         st.markdown("<div class='tutor-section-label'>Conversation</div>", unsafe_allow_html=True)
-
         active_thread = _get_active_thread()
-        messages = active_thread["messages"]
-
-        if not messages:
-            st.markdown(
-                """
-                <div class="tutor-chat-wrap">
-                    <div class="tutor-empty-state">
-                        No messages yet.<br><br>
-                        Ask the tutor to:
-                        <ul>
-                            <li>explain a chart</li>
-                            <li>clarify a concept</li>
-                            <li>compare methods</li>
-                            <li>suggest what to look at next</li>
-                        </ul>
-                    </div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-        else:
-            st.markdown("<div class='tutor-chat-wrap'>", unsafe_allow_html=True)
-            for msg in messages:
-                role_class = "user" if msg["role"] == "user" else "assistant"
-                role_label = "You" if msg["role"] == "user" else "Tutor"
-                st.markdown(
-                    f"""
-                    <div class="tutor-msg tutor-msg-{role_class}">
-                        <div class="tutor-msg-role">{role_label}</div>
-                        <div class="tutor-msg-content">{msg["content"]}</div>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
-            st.markdown("</div>", unsafe_allow_html=True)
+        _render_messages(active_thread["messages"])
 
         pending = st.session_state.get("tutor_pending")
         if pending and pending["thread_id"] == active_thread["id"]:
-            # st.info(f'You asked: "{pending["question"]}"')
             with st.spinner("Tutor is thinking..."):
                 _resolve_pending_message()
             st.rerun()
 
         if st.button("Clear current chat", key="sidebar_tutor_clear", use_container_width=True):
             active_thread["messages"] = []
-            active_thread["title"] = "New chat"
+            active_thread["title"] = NEW_CHAT_TITLE
             st.rerun()
 
         question = st.chat_input("Ask about this page...", key="sidebar_tutor_chat_input")
@@ -196,17 +184,49 @@ def render_sidebar_tutor() -> None:
             st.rerun()
 
 
+def _render_messages(messages: list[dict[str, str]]) -> None:
+    if not messages:
+        st.markdown(
+            """
+            <div class="tutor-chat-wrap">
+                <div class="tutor-empty-state">
+                    No messages yet.<br><br>
+                    Ask the tutor to:
+                    <ul>
+                        <li>explain a chart</li>
+                        <li>clarify a concept</li>
+                        <li>compare methods</li>
+                        <li>suggest what to look at next</li>
+                    </ul>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        return
+
+    st.markdown("<div class='tutor-chat-wrap'>", unsafe_allow_html=True)
+    for message in messages:
+        role_class = "user" if message["role"] == "user" else "assistant"
+        role_label = "You" if message["role"] == "user" else "Tutor"
+        st.markdown(
+            f"""
+            <div class="tutor-msg tutor-msg-{role_class}">
+                <div class="tutor-msg-role">{role_label}</div>
+                <div class="tutor-msg-content">{message["content"]}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
 def _init_state() -> None:
     if "tutor_model" not in st.session_state:
-        st.session_state["tutor_model"] = "mistral"
+        st.session_state["tutor_model"] = DEFAULT_TUTOR_MODEL
 
     if "tutor_threads" not in st.session_state:
-        first_thread = {
-            "id": str(uuid.uuid4()),
-            "title": "New chat",
-            "page": st.session_state.get("current_page", "home"),
-            "messages": [],
-        }
+        first_thread = _new_thread(st.session_state.get("current_page", "home"))
         st.session_state["tutor_threads"] = [first_thread]
 
     if "active_tutor_thread_id" not in st.session_state:
@@ -219,31 +239,28 @@ def _init_state() -> None:
         st.session_state["tutor_pending"] = None
 
 
-def _create_new_thread(page: str) -> None:
-    new_thread = {
+def _new_thread(page: str) -> dict:
+    return {
         "id": str(uuid.uuid4()),
-        "title": "New chat",
+        "title": NEW_CHAT_TITLE,
         "page": page,
         "messages": [],
     }
+
+
+def _create_new_thread(page: str) -> None:
+    new_thread = _new_thread(page)
     st.session_state["tutor_threads"].insert(0, new_thread)
     st.session_state["active_tutor_thread_id"] = new_thread["id"]
     st.session_state["open_rename_for_active"] = False
 
 
 def _delete_thread(thread_id: str) -> None:
-    threads = st.session_state["tutor_threads"]
+    threads = [thread for thread in st.session_state["tutor_threads"] if thread["id"] != thread_id]
     active_id = st.session_state["active_tutor_thread_id"]
 
-    threads = [t for t in threads if t["id"] != thread_id]
-
     if not threads:
-        new_thread = {
-            "id": str(uuid.uuid4()),
-            "title": "New chat",
-            "page": st.session_state.get("current_page", "home"),
-            "messages": [],
-        }
+        new_thread = _new_thread(st.session_state.get("current_page", "home"))
         threads = [new_thread]
         st.session_state["active_tutor_thread_id"] = new_thread["id"]
     elif active_id == thread_id:
@@ -253,11 +270,18 @@ def _delete_thread(thread_id: str) -> None:
     st.session_state["open_rename_for_active"] = False
 
 
+def _find_thread(thread_id: str) -> dict | None:
+    for thread in st.session_state["tutor_threads"]:
+        if thread["id"] == thread_id:
+            return thread
+    return None
+
+
 def _get_active_thread() -> dict:
     active_id = st.session_state["active_tutor_thread_id"]
-    for thread in st.session_state["tutor_threads"]:
-        if thread["id"] == active_id:
-            return thread
+    thread = _find_thread(active_id)
+    if thread is not None:
+        return thread
     return st.session_state["tutor_threads"][0]
 
 
@@ -265,7 +289,7 @@ def _queue_user_message(question: str, topic: str) -> None:
     active_thread = _get_active_thread()
     active_thread["messages"].append({"role": "user", "content": question})
 
-    if active_thread["title"] == "New chat":
+    if active_thread["title"] == NEW_CHAT_TITLE:
         active_thread["title"] = _make_chat_title(question)
 
     st.session_state["tutor_pending"] = {
@@ -280,78 +304,50 @@ def _resolve_pending_message() -> None:
     if not pending:
         return
 
-    thread_id = pending["thread_id"]
-    question = pending["question"]
-    topic = pending["topic"]
-
-    thread = None
-    for t in st.session_state["tutor_threads"]:
-        if t["id"] == thread_id:
-            thread = t
-            break
-
+    thread = _find_thread(pending["thread_id"])
     if thread is None:
         st.session_state["tutor_pending"] = None
         return
 
     chat_history = thread["messages"]
-    model = st.session_state.get("tutor_model", "mistral")
+    model = st.session_state.get("tutor_model", DEFAULT_TUTOR_MODEL)
 
     try:
         answer = ask_tutor(
-            question=question,
-            topic=topic,
+            question=pending["question"],
+            topic=pending["topic"],
             chat_history=chat_history[:-1],
             model=model,
         )
     except Exception as exc:
-        answer = f"⚠️ Request failed: {exc}"
+        answer = f"Request failed: {exc}"
 
     thread["messages"].append({"role": "assistant", "content": answer})
     st.session_state["tutor_pending"] = None
+
+
+def _normalize_title(title: str | None) -> str:
+    cleaned = (title or "").strip()
+    return cleaned or NEW_CHAT_TITLE
 
 
 def _make_chat_title(question: str) -> str:
     title = question.strip()
     if len(title) > 36:
         title = title[:36].rstrip() + "..."
-    return title or "New chat"
+    return title or NEW_CHAT_TITLE
 
 
 def _truncate_title(title: str, max_len: int) -> str:
-    title = title.strip() or "New chat"
+    title = title.strip() or NEW_CHAT_TITLE
     if len(title) <= max_len:
         return title
     return title[: max_len - 3].rstrip() + "..."
 
 
 def _get_suggestions(page: str) -> list[str]:
-    if page == "preprocessing":
-        return [
-            "Why do we scale features here?",
-            "What changed after preprocessing?",
-            "When should I remove outliers?",
-        ]
-
-    if page in {"kernel", "kernel trick"}:
-        return [
-            "Why does this kernel work here?",
-            "What is the kernel trick in simple words?",
-            "How do I choose between RBF and Polynomial?",
-        ]
-
-    if page == "pca":
-        return [
-            "What is the optimal k in this scree plot?",
-            "What does cumulative variance mean here?",
-            "How do I interpret this PCA plot?",
-        ]
-
-    return [
-        "What does this page do?",
-        "How should I use this tool?",
-        "What should I look at first?",
-    ]
+    normalized_page = "kernel" if page == "kernel trick" else page
+    return PAGE_SUGGESTIONS.get(normalized_page, DEFAULT_SUGGESTIONS)
 
 
 def _inject_sidebar_styles() -> None:

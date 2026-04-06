@@ -50,10 +50,23 @@ from src.data.sample_datasets import (
 from src.features.preprocessing import scale_numeric_features, summarize_dataframe
 from app.components.sidebar_tutor import render_sidebar_tutor
 
-from app.components.sidebar_tutor import render_sidebar_tutor
-
 st.session_state["current_page"] = "preprocessing"
-render_sidebar_tutor()
+st.session_state["tutor_context"] = {
+    "page": "preprocessing",
+    "section": "loading",
+    "visible_elements": [
+        "preprocessing page header",
+        "dataset uploader",
+        "sample dataset selector",
+    ],
+    "hidden_elements": [
+        "no kernel plot",
+        "no PCA scree plot",
+    ],
+    "controls": {},
+    "chart_summary": "The preprocessing pipeline page is open.",
+    "summary": "User is on the preprocessing page.",
+}
 
 st.title("🛠️ Preprocessing Pipeline")
 st.write("A guided workflow to understand, clean, transform, and export your dataset.")
@@ -112,6 +125,7 @@ with st.expander("Step 1 · Data Overview", expanded=is_step_open("overview")):
     render_complete_button("overview")
 
 if "preprocessing_df_raw" not in st.session_state:
+    render_sidebar_tutor()
     st.stop()
 
 df_raw = st.session_state["preprocessing_df_raw"]
@@ -261,6 +275,7 @@ with st.expander("Step 3 · Data Cleaning",expanded=is_step_open("cleaning")):
         render_complete_button("cleaning")
 
 if "preprocessing_df_clean" not in st.session_state:
+    render_sidebar_tutor()
     st.stop()
 
 df_clean = st.session_state["preprocessing_df_clean"]
@@ -583,6 +598,7 @@ with st.expander("Step 5 · Data Transformation", expanded=is_step_open("transfo
         render_complete_button("transformation")
 
 if "processed_df" not in st.session_state:
+    render_sidebar_tutor()
     st.stop()
 
 df_transformed = st.session_state["processed_df"]
@@ -741,6 +757,7 @@ st.session_state["preprocessing_context"] = {
 }
 st.session_state["current_page"] = "preprocessing"
 st.session_state["tutor_context"] = {
+    "page": "preprocessing",
     "section": "preprocessing pipeline",
     "dataset_name": dataset_name,
     "visible_elements": [
@@ -766,5 +783,6 @@ st.session_state["tutor_context"] = {
 }
 
 st.success("✅ Processed dataset is ready and stored for use in other pages.")
+render_sidebar_tutor()
 
 
